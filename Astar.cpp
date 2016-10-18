@@ -1,212 +1,202 @@
-/* 
- * Chengtao Wang, 10/10/2016
- * ctwang28@gmail.com
-*/
-#include <map>
-#include <vector>
-#include <iostream>
-#include <iomanip>
-#include <cmath>
-#include <algorithm>
-#include "Astar.hpp"
+//
+//  Astar.cpp
+//  Astar
+//
+//  Created by Tianhao Ye on 10/15/16.
+//  Copyright © 2016 Tianhao Ye. All rights reserved.
+//
 
-using namespace std;
+#include "Astar.h"
 
-Astar::Astar(int ms, int st, int go){
-	//The constructor, generate the grid map, initialize some values.
-	this->map_size = ms;
-	this->start = st;
-	this->goal = go;
-	int nodenumber = 0;
-	for (int i = 0; i < map_size; i++){
-		for (int j = 0; j < map_size; j++){
-			this->grid_map.insert(pair<int, char> (nodenumber, '.'));
-			nodenumber++;
-		}
-	}
-	// '.' for not filled, '#' for filled, '@' for path, '+' for start and goal
-	
-	this->Openset.push_back(this->start);
-	for(int i = 0; i < nodenumber; i++){
-		this->gscore.insert(pair<int, double> (i, 1000));
-		this->fscore.insert(pair<int, double> (i, 1000));
-	}
-	this->gscore[this->start] = 0;
-	this->fscore[this->start] = this->heuristic_cost(this->start, this->goal);
-
+Astar::Astar(size_t r, size_t c, size_t start, size_t goal) :
+	_row(r), _col(c), _start(start), _goal(goal)
+{
+	initialize();
 }
 
-int* Astar::getcoor(int node){
-	//Get the cooridinate of a node
-	int *coor;
-	coor = new int[2];
-	coor[0] = node%this->map_size+1;
-	coor[1] = node/this->map_size+1;
-	return coor;
+Astar::Astar(size_t s, size_t start, size_t goal) :
+	_row(s), _col(s), _start(start), _goal(goal)
+{
+	initialize();
 }
 
-double Astar::heuristic_cost(int from, int to){
+Astar::~Astar()
+{
+	delete _map;
+	_map = nullptr;
+	for (size_t i = 0; i < _nodeNum; i++) {
+		delete _nodes[i];
+	}
+	delete [] _nodes;
+	_nodes = nullptr;
+}
+
+void Astar::initialize()
+{
+	// generate a new map
+	_map = new GridMap(_row, _col);
+	// generate all the nodes
+	_nodeNum = _row * _col;
+	_nodes = new Node* [_nodeNum];
+	for (size_t i = 0; i < _nodeNum; i++) {
+		_nodes[i] = new Node(i);
+		_nodes[i]->x = i / _col;
+		_nodes[i]->y = i % _col;
+	}
+	// set the start
+	_nodes[_start]->gScore = 0;
+	_nodes[_start]->fScore = heuristicCost(_start, _goal);
+	_path.push_back(_start);
+	_openSet.push_back(_start);
+	// plot start and goal on the map
+	_map->setSymbolAt(_start, '*');
+	_map->setSymbolAt(_goal, '&');
+	_pathExists = false;
+}
+
+double Astar::heuristicCost(size_t from, size_t to){
 	//Compute the heuristic cost between two nodes
-	int *coor_f;
-	int *coor_t;
 	double cost;
-	coor_f = this->getcoor(from);
-	coor_t = this->getcoor(to);
-	cost = sqrt(pow((coor_f[0] - coor_t[0]),2) + pow((coor_f[1] - coor_t[1]),2));
+	cost = sqrt(pow((_nodes[from]->x - _nodes[to]->x),2) + pow((_nodes[from]->y - _nodes[to]->y),2));
 	return cost;
 }
 
-bool Astar::isneighbor(int node){
+bool Astar::isObstacle(size_t x, size_t y){
 	//Whether the neighbor of the node is available
-	if (this->grid_map[node] == '#') {return 0;}
-	else {return 1;}
+	return _map->getSymbolAt(x, y) == '#';
 }
 
-vector<int> Astar::Getallneighbor(int current){
-	//Generate all neibor nodes of the current
-	vector<int> allneighbor;
-	int gs = this->map_size;
-	int *coor;
-	coor = getcoor(current);
-	if (coor[0] < gs){
-		if (isneighbor(current + 1)) {allneighbor.push_back(current + 1);}
-	}
-	if (coor[0] > 1){
-		if (isneighbor(current - 1)) {allneighbor.push_back(current - 1);}
-	}
-	if (coor[1] < gs){
-		if (isneighbor(current + gs)) {allneighbor.push_back(current + gs);}
-	}
-	if (coor[1] > 1){
-		if (isneighbor(current - gs)) {allneighbor.push_back(current - gs);}
-	}
-	if (coor[1] > 1 && coor[0] > 1){
-		if (isneighbor(current - gs - 1)) {allneighbor.push_back(current - gs - 1);}
-	}
-	if (coor[1] > 1 && coor[0] < gs){
-		if (isneighbor(current - gs + 1)) {allneighbor.push_back(current - gs + 1);}
-	}
-	if (coor[1] < gs && coor[0] > 1){
-		if (isneighbor(current + gs - 1)) {allneighbor.push_back(current + gs - 1);}
-	}
-	if (coor[1] < gs && coor[0] < gs){
-		if (isneighbor(current + gs + 1)) {allneighbor.push_back(current + gs + 1);}
-	}
-
-	return allneighbor;
+bool Astar::isObstacle(size_t nodeIdx){
+	//Whether the neighbor of the node is available
+	return _map->getSymbolAt(nodeIdx) == '#';
 }
 
-void Astar::generate_obstacle(vector<int> obstacle){
-	//Set the wall
-	char fill = '#';
-	int n = obstacle.size();
-	for(int i = 0; i < n; i++){
-		this->grid_map[obstacle[i]] = fill;
+std::vector<size_t> Astar::getNeighbor(size_t nodeIdx)
+{
+	std::vector<size_t> neighbors;
+	if (_nodes[nodeIdx]->y > 0)  {
+		if (!isObstacle(nodeIdx - 1)) {
+			neighbors.push_back(nodeIdx - 1);
+		}
+		if (_nodes[nodeIdx]->x > 0 && !isObstacle(nodeIdx - _col - 1)) {
+			neighbors.push_back(nodeIdx - _col - 1);
+		}
+		if (_nodes[nodeIdx]->x < (_row - 1) && !isObstacle(nodeIdx + _col - 1)) {
+			neighbors.push_back(nodeIdx + _col - 1);
+		}
 	}
+	if (_nodes[nodeIdx]->y < (_col - 1)) {
+		if (!isObstacle(nodeIdx + 1)) {
+			neighbors.push_back(nodeIdx + 1);
+		}
+		if (_nodes[nodeIdx]->x > 0 && !isObstacle(nodeIdx - _col + 1)) {
+			neighbors.push_back(nodeIdx - _col + 1);
+		}
+		if (_nodes[nodeIdx]->x < (_row - 1) && !isObstacle(nodeIdx + _col + 1)) {
+			neighbors.push_back(nodeIdx + _col + 1);
+		}
+	}
+	if (_nodes[nodeIdx]->x > 0 && !isObstacle(nodeIdx - _col)) {
+		neighbors.push_back(nodeIdx - _col);
+	}
+
+	if (_nodes[nodeIdx]->x < (_row - 1) && !isObstacle(nodeIdx + _col)) {
+		neighbors.push_back(nodeIdx + _col);
+	}
+
+	return neighbors;
 }
 
-void Astar::astar_algorithm(){
-	//The main Astar algorithm
-	int path = 0;//Wheter there is a path.
-	while ( !this->Openset.empty() ){
-		//Current = the node in Openset having the least fscore value.
-		int current;
-		double leastf = 1000;
-		for (int i = 0; i < this->Openset.size();i++){
-			if (this->fscore[this->Openset[i]] < leastf) {
-				leastf = this->fscore[this->Openset[i]];
-				current = this->Openset[i];
+
+void Astar::setObstacle(std::vector<size_t> obstacle){
+	// plot the wall
+	for(size_t i = 0; i < obstacle.size(); i++){
+		_map->setSymbolAt(obstacle[i], '#');
+	}
+	return;
+}
+
+void Astar::pathPlanning()
+{
+	_pathExists = false;
+	while (!_openSet.empty()) {
+		double lowestF = DBL_MAX;
+		size_t cur;
+		for (auto it = _openSet.begin(); it != _openSet.end(); it++) {
+			if (_nodes[*it]->fScore < lowestF) {
+				lowestF = _nodes[*it]->fScore;
+				cur = *it;
 			}
 		}
+		if (cur == _goal) {
+			_pathExists = true;
+			break;
+		} else {
+			auto it = find(_openSet.begin(), _openSet.end(), cur);
+			_openSet.erase(it);
+			_closedSet.push_back(cur);
+			std::vector<size_t> neighbors = getNeighbor(cur);
+			for (size_t i = 0; i < neighbors.size(); i++) {
+				auto it = find(_closedSet.begin(), _closedSet.end(), neighbors[i]);
+				if (it == _closedSet.end()) {
+					double tentativeGScore = _nodes[cur]->gScore + heuristicCost(cur, neighbors[i]);
+					auto it = find(_openSet.begin(), _openSet.end(), neighbors[i]);
+					if (it == _openSet.end()) {
+						_openSet.push_back(neighbors[i]);
+					} else if (tentativeGScore >= _nodes[neighbors[i]]->gScore) {
+						continue;
+					}
+					_nodes[neighbors[i]]->cameFrom = cur;
+					_nodes[neighbors[i]]->gScore = tentativeGScore;
+					_nodes[neighbors[i]]->fScore = tentativeGScore + heuristicCost(neighbors[i], _goal);
 
-		if (current == this->goal){
-			path = 1;
-			this->reconstruct_path(current);
+				}
+			}
 		}
-		//cout << "Current is: " << current  << endl;
-
-		//Remove current from Openset
-		vector<int>::iterator itr = this->Openset.begin();
-		while (itr != this->Openset.end()){
-			if (*itr == current){this->Openset.erase(itr);break;}
-			itr++;
-		}
-		//Add current to Closedset
-		this->Closedset.push_back(current);
-		//cout<<"Add current to Closedset" << current<<endl;
-
-		//For each neighbor of Current, figure out all the neighbor.
-		vector<int> neighbor = this->Getallneighbor(current);
-		//Call the function Getallneighbor
-		for(int i = 0; i < neighbor.size(); i++){
-			//cout<< "Neighbor is"<< neighbor[i]<<endl;
-			vector<int>::iterator itr2;
-			int nodenei = neighbor[i];
-			itr2 = find(this->Closedset.begin(), this->Closedset.end(), nodenei);
-			if (itr2 != this->Closedset.end()) {continue;} //Ignore already evaluated neighbor
-
-			double t_gscore = this->gscore[current] + this->heuristic_cost(current, nodenei);
-
-			itr2 = find(this->Openset.begin(), this->Openset.end(), nodenei);
-			if (itr2 == this->Openset.end()) {this->Openset.push_back(nodenei);}//Discover new node
-			else if (t_gscore >= this->gscore[nodenei]) {continue;}//Not a better path
-
-			this->camefrom.insert(pair<int, int> (nodenei, current));
-			this->gscore[nodenei] = t_gscore;
-			this->fscore[nodenei] = t_gscore + this->heuristic_cost(nodenei, goal);
-		}
-
 	}
-	
-	if (path == 0){
-		cout << "There is no path to the goal!" << endl;
+	if (_pathExists) {
+		_path.push_back(_goal);
+		size_t cur = _nodes[_goal]->cameFrom;
+		while (cur != _start) {
+			_path.push_back(cur);
+			size_t previous = _nodes[cur]->cameFrom;
+			if (_nodes[cur]->x == _nodes[previous]->x) {
+				_map->setSymbolAt(cur, '-');
+			} else if (_nodes[cur]->y == _nodes[previous]->y) {
+				_map->setSymbolAt(cur, '|');
+			} else if (_nodes[cur]->x < _nodes[previous]->x ) {
+				if (_nodes[cur]->y < _nodes[previous]->y) _map->setSymbolAt(cur, '\\');
+				else _map->setSymbolAt(cur, '/');
+			} else {
+				if (_nodes[cur]->y < _nodes[previous]->y) _map->setSymbolAt(cur, '/');
+				else _map->setSymbolAt(cur, '\\');
+			}
+			cur = previous;
+		}
+		std::cout << "Path planned." << std::endl;
+	} else {
+		std::cout << "There is no path to the destination!" << std::endl;
 	}
+	return;
 }
 
-void Astar::reconstruct_path(int current){
-	//Generate the Astar path
-	vector<int> total_path;
-	total_path.push_back(current);
-	while (1){
-		current = this->camefrom[current];
-		total_path.push_back(current);
-		if (current == this->start){break;}
-	}
-	cout<< "Get path"<<endl;
-
-	for (int i = 0; i < total_path.size(); i++){
-		char path = '@';
-		this->grid_map[total_path[i]] = path;
-	}
+void Astar::showMap()
+{
+	_map->printMap();
+	return;
 }
 
-void Astar::print_map(){
-	//Print the map
-	//set the start and goal
-	char startgoal = '+';
-	this->grid_map[this->start] = startgoal;
-	this->grid_map[this->goal] = startgoal;
-	
-	int k=0;
-	for (int i = 0; i < this->map_size; i++){
-		for (int j = 0; j < this->map_size; j++){
-			cout<< this->grid_map[k]<<' ';
-			k++;
+void Astar::showPath()
+{
+	if (_pathExists) {
+		std::cout << "Path: " << _start;
+		for (auto it = _path.begin() + 1; it != _path.end(); it++) {
+			std::cout << "->" << *it;
 		}
-		cout<<endl;
-	}
-	cout<<endl;
+		std::cout << std::endl;
+	} else {
+		std::cout << "There is no path to the destination!" << std::endl;
 
-	//Print number of the grids
-	k=0;
-	for (int i = 0; i < this->map_size; i++){
-		for (int j = 0; j < this->map_size; j++){
-			cout<< setw(2) << k <<' ';
-			k++;
-		}
-		cout<<endl;
 	}
-	cout<<endl;
-
+	return;
 }
-
